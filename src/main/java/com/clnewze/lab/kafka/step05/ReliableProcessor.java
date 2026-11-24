@@ -71,7 +71,12 @@ public final class ReliableProcessor {
         this.backoffMillis = backoffMillis;
     }
 
+    /**
+     * 메시지 한 건을 처리하고 결과를 돌려준다. 이 메서드가 정상적으로 돌아오면 소비 루프는 커밋해도 된다.
+     * 예외를 던지는 경우는 DLT 저장마저 실패했을 때뿐이다 → 그때는 커밋하면 안 된다.
+     */
     public Outcome handle(ConsumerRecord<String, String> record) {
+        // ① 본문 읽기. Kafka 는 내용을 검사하지 않으므로 아무 문자열이나 올 수 있다
         DeviceEvent event;
         try {
             event = Json.read(record.value());
@@ -79,14 +84,23 @@ public final class ReliableProcessor {
             return sendToDlt(record, "JSON 아님: " + e.getOriginalMessage());
         }
 
+        // ② 중복 검사. at-least-once 라서 같은 메시지가 다시 오는 건 "언젠가 반드시" 일어난다.
+        //    (커밋 전에 죽음, 리밸런스, 프로듀서 쪽 재전송 등)
         if (processedEventIds.contains(event.eventId())) {
             log.info("중복 건너뜀 eventId={} (offset={})", event.eventId(), record.offset());
             return Outcome.DUPLICATE_SKIPPED;
         }
 
+        // ③ 처리 + 재시도. 실패 종류에 따라 갈린다
+        //    PermanentFailure → 바로 DLT (다시 해도 결과가 같다)
+        //    TransientFailure → 잠깐 쉬고 다시. maxAttempts 를 넘기면 DLT
+        //
+        //    주의: 여기서 쉬는 동안 이 파티션의 다음 메시지는 기다린다(blocking retry).
+        //    재시도를 길게 잡으면 poll 간격이 max.poll.interval.ms 를 넘어 그룹에서 쫓겨날 수 있다
         for (int attempt = 1; ; attempt++) {
             try {
                 apply(event);
+                // 처리에 성공한 뒤에 기록한다. 기록 먼저 하면, 처리 도중 죽었을 때 다시 와도 건너뛰게 된다
                 processedEventIds.add(event.eventId());
                 return Outcome.PROCESSED;
             } catch (PermanentFailure e) {
@@ -96,6 +110,7 @@ public final class ReliableProcessor {
                     return sendToDlt(record, "재시도 " + maxAttempts + "회 실패: " + e.getMessage());
                 }
                 log.warn("일시적 실패 {}회째 eventId={} → {}ms 뒤 재시도", attempt, event.eventId(), backoffMillis * attempt);
+                // 대기 시간을 조금씩 늘린다 (300ms → 600ms …). 상대가 회복할 틈을 준다
                 sleep(backoffMillis * attempt);
             }
         }
@@ -120,7 +135,10 @@ public final class ReliableProcessor {
      * 동기(.get())로 보낸다 — DLT 저장이 확인되기 전에 원본 offset 을 커밋하면 메시지가 사라진다.
      */
     private Outcome sendToDlt(ConsumerRecord<String, String> record, String reason) {
+        // 원본의 키 · 값을 그대로 옮긴다. 고쳐서 보내지 않는다 — 나중에 원인을 보려면 원본이 필요하다
         ProducerRecord<String, String> dlt = new ProducerRecord<>(KafkaSettings.DLT_TOPIC, record.key(), record.value());
+        // 헤더: 본문과 별개로 붙이는 키-값 메타데이터. "왜 · 어디서" 를 여기 적어 두면
+        // DLT 를 보는 사람이 원본 토픽을 뒤지지 않아도 된다
         dlt.headers()
                 .add("dlt.reason", bytes(reason))
                 .add("dlt.original.topic", bytes(record.topic()))

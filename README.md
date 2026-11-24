@@ -71,6 +71,21 @@ Step 05  이상한 메시지가 와도 멈추지 않는다   ← 중복 · 재�
 **배우는 것**: 토픽은 메시지를 담는 이름 붙은 통이다. 통 안은 **파티션**이라는 칸 여러 개로 나뉘어 있다.
 이 실습의 `device-events` 토픽은 칸이 3개다.
 
+```mermaid
+flowchart LR
+    subgraph B["브로커 (Kafka 서버 1대)"]
+        subgraph T["토픽 device-events"]
+            P0["partition 0"]
+            P1["partition 1"]
+            P2["partition 2"]
+        end
+        subgraph D["토픽 device-events.DLT"]
+            D0["partition 0"]
+        end
+    end
+```
+
+
 ```bash
 ./gradlew topic
 ```
@@ -103,6 +118,25 @@ Step 05  이상한 메시지가 와도 멈추지 않는다   ← 중복 · 재�
 
 **배우는 것**: 메시지를 보낼 때 **키**를 붙인다. 이 실습에서는 키가 설비 번호(`device-A`, `device-B`, `device-C`)다.
 **같은 키는 항상 같은 칸(파티션)에 들어간다.** 그래서 같은 설비의 메시지는 보낸 순서대로 쌓인다.
+
+```mermaid
+flowchart LR
+    PR["Producer"]
+    PR -- "key=device-A" --> H{"hash(key) % 3"}
+    PR -- "key=device-B" --> H
+    PR -- "key=device-C" --> H
+    H --> P0["partition 0 | A0 · B1 · A2 · B3 ..."]
+    H --> P1["partition 1 | C0 · C1 · C2 ..."]
+    H --> P2["partition 2 | (비어 있음)"]
+```
+
+칸 안에서는 뒤에 붙기만 한다. 칸마다 번호(offset)가 0 부터 따로 붙는다.
+
+```
+partition 0 : [0:A] [1:B] [2:A] [3:B] [4:A] ...  → 새 메시지는 오른쪽 끝에
+partition 1 : [0:C] [1:C] [2:C] ...
+```
+
 
 ```bash
 ./gradlew produce -Pargs="9"     # 9건 보내기
@@ -143,6 +177,31 @@ Step 05  이상한 메시지가 와도 멈추지 않는다   ← 중복 · 재�
 **배우는 것**: 받는 쪽은 Kafka 가 밀어 주는 걸 기다리는 게 아니라 **스스로 당겨 온다**(`poll`).
 다 처리하면 "여기까지 읽었다" 를 Kafka 에 적어 둔다(**커밋**). 그래서 껐다 켜도 **이어서** 읽는다.
 
+```mermaid
+sequenceDiagram
+    participant C as Consumer (그룹 step03)
+    participant K as Kafka
+
+    C->>K: poll()
+    K-->>C: offset 0, 1, 2 메시지
+    Note over C: 처리
+    C->>K: commit (다음엔 3부터)
+    C->>K: poll()
+    K-->>C: (새 메시지 없음)
+    Note over C: Ctrl+C 로 종료
+    Note over C: 다시 실행
+    C->>K: poll() — 그룹 step03 은 어디까지 읽었지?
+    K-->>C: 3부터 (이미 읽은 0~2 는 안 준다)
+```
+
+```
+partition 0 : [0] [1] [2] [3] [4] [5]
+                          ▲
+              그룹 step03 의 커밋 위치 (다음에 읽을 곳)
+              그룹 other  은 아직 커밋이 없다 → 맨 앞 [0] 부터
+```
+
+
 ```bash
 ./gradlew consume      # Ctrl+C 로 종료
 ```
@@ -177,6 +236,49 @@ Step 05  이상한 메시지가 와도 멈추지 않는다   ← 중복 · 재�
 
 **배우는 것**: **같은 그룹 이름**으로 소비자를 여러 개 띄우면 칸(파티션)을 **나눠 맡는다**.
 한 칸은 그룹 안에서 한 명만 맡는다. 누가 들어오거나 나가면 칸을 다시 나눈다(**리밸런스**).
+
+```mermaid
+flowchart LR
+    subgraph A["① worker-1 혼자"]
+        direction LR
+        a0["partition 0"] --> w1a["worker-1"]
+        a1["partition 1"] --> w1a
+        a2["partition 2"] --> w1a
+    end
+    subgraph B2["② worker-2 참가 → 리밸런스"]
+        direction LR
+        b0["partition 0"] --> w1b["worker-1"]
+        b1["partition 1"] --> w1b
+        b2["partition 2"] --> w2b["worker-2"]
+    end
+    subgraph C3["③ worker-1 종료 → 리밸런스"]
+        direction LR
+        c0["partition 0"] --> w2c["worker-2"]
+        c1["partition 1"] --> w2c
+        c2["partition 2"] --> w2c
+    end
+    A ==> B2 ==> C3
+```
+
+칸보다 사람이 많으면 남는 사람은 논다.
+
+```mermaid
+flowchart LR
+    p0["partition 0"] --> x1["worker-1"]
+    p1["partition 1"] --> x2["worker-2"]
+    p2["partition 2"] --> x3["worker-3"]
+    x4["worker-4 (배정 없음 · 대기)"]
+```
+
+**그룹이 다르면** 같은 메시지를 각자 다 받는다.
+
+```mermaid
+flowchart LR
+    T["device-events"] --> G1["그룹 step04 (나눠 받음)"]
+    T --> G2["그룹 step03 (따로 전부 받음)"]
+    T --> G3["그룹 step05 (따로 전부 받음)"]
+```
+
 
 터미널 3개를 연다.
 
@@ -226,6 +328,40 @@ Step 05  이상한 메시지가 와도 멈추지 않는다   ← 중복 · 재�
 | **영구적 실패** | JSON 이 깨짐, 온도가 -999 도 | 다시 해도 안 된다 → **DLT(따로 빼 두는 토픽)** 로 옮기고 다음 메시지로 |
 
 영구 실패를 계속 재시도하면 그 한 건 때문에 뒤의 메시지가 **전부 막힌다.** 그래서 빼 둔다.
+
+```mermaid
+flowchart TD
+    M["메시지 1건 도착"] --> J{"JSON 으로 읽히나?"}
+    J -- "아니오 (영구 실패)" --> DLT[("device-events.DLT 로 옮김")]
+    J -- "예" --> DUP{"이미 처리한 eventId?"}
+    DUP -- "예 (중복)" --> SKIP["건너뜀"]
+    DUP -- "아니오" --> RUN["처리"]
+    RUN -- "성공" --> OK["eventId 기록 → 완료"]
+    RUN -- "값이 말이 안 됨 (영구 실패)" --> DLT
+    RUN -- "일시적 실패" --> RETRY{"3번 넘었나?"}
+    RETRY -- "아니오" --> WAIT["잠깐 기다림 (300ms, 600ms ...)"] --> RUN
+    RETRY -- "예" --> DLT
+    OK --> NEXT["다음 메시지"]
+    SKIP --> NEXT
+    DLT --> NEXT
+```
+
+커밋은 **DLT 저장이 확인된 뒤**에 한다. 순서가 바뀌면 메시지가 사라진다.
+
+```mermaid
+sequenceDiagram
+    participant C as Consumer
+    participant K as device-events
+    participant D as device-events.DLT
+
+    K-->>C: offset 13 (온도 -999)
+    Note over C: 처리 실패 (영구)
+    C->>D: 원본 + 실패 이유 헤더
+    D-->>C: 저장 확인
+    C->>K: commit (다음엔 14부터)
+    Note over C,K: 확인 전에 죽으면? → 커밋 안 됐으니 13 을 다시 받는다 (안전)
+```
+
 
 ```bash
 ./gradlew produceBad   # 문제가 섞인 메시지 5건을 보낸다
@@ -285,6 +421,7 @@ dlt.reason:절대영도보다 낮은 온도: -999.0,dlt.original.topic:device-ev
 | [04-신뢰성](docs/04-신뢰성.md) | Step 05 깊게 — 전달 보장, 멱등 처리, 재시도 위치 |
 | [05-Spring-Kafka-로-옮기기](docs/05-Spring-Kafka-로-옮기기.md) | 여기서 직접 한 것이 Spring Kafka 에서는 어디에 있나 |
 | [06-MSA-와-Kafka](docs/06-MSA-와-Kafka.md) | 동기 vs 비동기, 서비스 = 그룹, Outbox, Saga, 이벤트 계약, 언제 안 쓰나 |
+| [07-API-와-Kafka-연계](docs/07-API-와-Kafka-연계.md) | REST API 에서 Kafka 로 — 201 vs 202, 명령 상태, Idempotency-Key, SSE 푸시, 조회 모델 |
 
 ## 테스트
 

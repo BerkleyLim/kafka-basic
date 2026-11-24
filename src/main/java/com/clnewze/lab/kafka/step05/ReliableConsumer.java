@@ -33,9 +33,13 @@ public final class ReliableConsumer {
 
         KafkaConsumer<String, String> consumer = new KafkaConsumer<>(SimpleConsumer.consumerProps(groupId));
         SimpleConsumer.installShutdownHook(consumer);
+        // 결과별 건수 (처리 / 중복 / DLT) — 실행 끝에 한눈에 보려고
         Map<ReliableProcessor.Outcome, Integer> stats = new EnumMap<>(ReliableProcessor.Outcome.class);
 
+        // 소비자와 DLT 용 프로듀서를 같이 연다. try 에 둘 다 넣으면 끝날 때 역순으로 둘 다 닫힌다
+
         try (consumer; KafkaProducer<String, String> dltProducer = new KafkaProducer<>(SimpleProducer.producerProps())) {
+            // 최대 3번 시도, 재시도 간격 300ms 부터 시작
             ReliableProcessor processor = new ReliableProcessor(dltProducer, 3, 300);
             consumer.subscribe(List.of(KafkaSettings.TOPIC));
             log.info("그룹 '{}' 시작 (Ctrl+C 로 종료)", groupId);
@@ -44,9 +48,12 @@ public final class ReliableConsumer {
                 while (true) {
                     ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(1));
                     for (ConsumerRecord<String, String> record : records) {
+                        // 한 건씩 처리. 실패해도 DLT 로 옮기고 정상적으로 돌아오므로 루프는 멈추지 않는다.
+                        // DLT 저장마저 실패하면 예외가 올라와 루프를 빠져나간다 → 아래 커밋을 안 하게 된다
                         stats.merge(processor.handle(record), 1, Integer::sum);
                     }
                     if (!records.isEmpty()) {
+                        // 묶음 전체를 처리(또는 DLT 로 이동)한 뒤에만 커밋
                         consumer.commitSync();
                         log.info("누적 결과 {}", stats);
                     }

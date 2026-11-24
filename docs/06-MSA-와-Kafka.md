@@ -21,6 +21,22 @@
 | 응답 | 바로 결과를 받는다 | 결과는 나중에, 다른 이벤트로 |
 | 새 소비자 추가 | 호출하는 쪽 코드를 고쳐야 한다 | **그룹 하나 더 붙이면 끝** (보내는 쪽 무수정) |
 
+```mermaid
+flowchart LR
+    subgraph SYNC["동기 호출"]
+        direction LR
+        O1["주문 서비스"] -- "REST 요청 · 응답 대기" --> S1["재고 서비스"]
+        S1 -. "재고가 죽으면 주문도 실패" .-> O1
+    end
+    subgraph ASYNC["Kafka 이벤트"]
+        direction LR
+        O2["주문 서비스"] -- "OrderCreated" --> T[("order-events")]
+        T --> I["재고 (그룹 inventory)"]
+        T --> P["결제 (그룹 payment)"]
+        T --> N["알림 (그룹 notification)"]
+    end
+```
+
 **둘 중 하나만 쓰는 게 아니다.** "지금 답이 필요한 질문"(재고 몇 개?)은 동기, "일어난 사실의 전파"(주문됐다)는 이벤트.
 
 ## 2. 이 저장소에서 배운 것 → MSA 에서의 의미
@@ -35,6 +51,30 @@
 | **DLT** (Step 05) | 한 서비스의 데이터 오류가 그 서비스의 처리 전체를 막지 않게. DLT 는 서비스(그룹)마다 따로 둔다 |
 | **LAG** | 서비스 건강 지표. LAG 이 계속 늘면 그 서비스가 못 따라가는 중 |
 
+한 서비스 안의 인스턴스는 같은 그룹이라 칸을 나눠 받고, 서비스끼리는 그룹이 달라 각자 전부 받는다.
+
+```mermaid
+flowchart LR
+    subgraph T["order-events (partition 3)"]
+        p0["p0"]
+        p1["p1"]
+        p2["p2"]
+    end
+    subgraph INV["재고 서비스 = 그룹 inventory"]
+        i1["인스턴스 1"]
+        i2["인스턴스 2"]
+    end
+    subgraph PAY["결제 서비스 = 그룹 payment"]
+        y1["인스턴스 1"]
+    end
+    p0 --> i1
+    p1 --> i1
+    p2 --> i2
+    p0 --> y1
+    p1 --> y1
+    p2 --> y1
+```
+
 ## 3. 서비스마다 DB 따로 — 그럼 데이터는 어떻게 맞추나
 
 MSA 의 기본은 **Database per Service**: 다른 서비스의 DB 를 직접 읽지 않는다.
@@ -44,6 +84,19 @@ MSA 의 기본은 **Database per Service**: 다른 서비스의 DB 를 직접 �
 |---|---|---|
 | 이벤트 알림 (Event Notification) | `{"orderId": 1, "type": "CREATED"}` 만 보냄. 필요하면 받는 쪽이 조회 API 호출 | 이벤트가 가볍다 / 결국 동기 호출이 생긴다 |
 | 상태 실어 보내기 (Event-Carried State Transfer) | 필요한 필드를 이벤트에 담아 보냄. 받는 쪽이 **자기 DB 에 복사본**을 둠 | 호출 없음, 장애 격리 / 복사본은 **잠깐 늦을 수 있다** (최종 일관성) |
+
+```mermaid
+flowchart LR
+    subgraph C["고객 서비스"]
+        CS["고객 서비스"] --- CDB[("고객 DB")]
+    end
+    subgraph O["주문 서비스"]
+        OS["주문 서비스"] --- ODB[("주문 DB + 고객 이름 복사본")]
+    end
+    CS -- "CustomerRenamed {id, name}" --> T[("customer-events")]
+    T --> OS
+    X["✗ 주문 서비스는 고객 DB 를 직접 읽지 않는다"]
+```
 
 ## 4. 이중 쓰기 문제와 Outbox 패턴 ⭐
 
@@ -61,7 +114,38 @@ void placeOrder(Order order) {
 - ② 성공 → 트랜잭션 롤백: 없는 주문의 이벤트가 나갔다
 - DB 트랜잭션 안에서 브로커를 부르면, 브로커가 느릴 때 DB 커넥션까지 붙잡힌다
 
+```mermaid
+sequenceDiagram
+    participant S as 주문 서비스
+    participant DB as 주문 DB
+    participant K as Kafka
+
+    S->>DB: ① 주문 저장 (커밋 성공)
+    S-xK: ② 이벤트 전송 — 네트워크 실패
+    Note over DB,K: DB 에는 주문이 있는데 Kafka 엔 없다 → 재고 · 결제는 영영 모른다
+```
+
 **Transactional Outbox**:
+
+```mermaid
+sequenceDiagram
+    participant S as 주문 서비스
+    participant DB as 주문 DB (orders + outbox)
+    participant R as 릴레이 (스케줄러 / CDC)
+    participant K as Kafka
+
+    S->>DB: BEGIN
+    S->>DB: INSERT orders
+    S->>DB: INSERT outbox (이벤트)
+    S->>DB: COMMIT — 둘 다 되거나 둘 다 안 되거나
+    loop 주기적으로
+        R->>DB: 안 보낸 outbox 읽기
+        R->>K: 전송
+        K-->>R: 확인
+        R->>DB: 보냄 표시
+    end
+    Note over R,K: 표시 전에 죽으면 다시 보낸다 → 받는 쪽 멱등 처리 필요
+```
 
 ```
 ① 같은 DB 트랜잭션에서            ② 별도 릴레이가
@@ -89,6 +173,38 @@ Orchestration (지휘형) — 오케스트레이터가 명령을 보냄
  오케스트레이터 ──"재고 잡아라"(command)──▶ 재고 ──"잡았다"(reply)──▶ 오케스트레이터
                ──"결제해라"──────────────▶ 결제 ──"실패"────────────▶ 오케스트레이터
                ──"재고 풀어라"(보상)─────▶ 재고
+```
+
+Choreography 를 그림으로 (결제 실패 → 보상):
+
+```mermaid
+sequenceDiagram
+    participant O as 주문
+    participant I as 재고
+    participant P as 결제
+
+    O->>I: OrderCreated
+    I->>P: StockReserved
+    P-->>I: PaymentFailed
+    P-->>O: PaymentFailed
+    Note over I: 보상 — 잡아 둔 재고 풀기
+    Note over O: 보상 — 주문 취소
+```
+
+Orchestration:
+
+```mermaid
+sequenceDiagram
+    participant X as 오케스트레이터
+    participant I as 재고
+    participant P as 결제
+
+    X->>I: ReserveStock (명령)
+    I-->>X: StockReserved (응답)
+    X->>P: ChargePayment (명령)
+    P-->>X: PaymentFailed (응답)
+    X->>I: ReleaseStock (보상 명령)
+    I-->>X: StockReleased
 ```
 
 | | Choreography | Orchestration |
@@ -123,6 +239,16 @@ Orchestration (지휘형) — 오케스트레이터가 명령을 보냄
 ## 8. CQRS — 읽기 모델 따로
 
 쓰기 서비스가 이벤트를 내면, 조회 전용 서비스가 그걸 받아 **조회에 맞춘 형태**(검색 인덱스, 집계 테이블, 화면용 표)로 쌓는다.
+
+```mermaid
+flowchart LR
+    O["주문 서비스"] --> T1[("order-events")]
+    C["고객 서비스"] --> T2[("customer-events")]
+    T1 --> Q["조회 서비스"]
+    T2 --> Q
+    Q --> V[("화면용 표 · 검색 인덱스")]
+    UI["관리자 화면"] -- "조회는 여기 한 곳만" --> V
+```
 여러 서비스 데이터를 합친 화면이 필요할 때, 매번 여러 서비스를 호출하는 대신 이 읽기 모델 하나만 본다.
 
 ## 9. Kafka 가 맞지 않을 때
