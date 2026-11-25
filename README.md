@@ -434,6 +434,27 @@ dlt.reason:절대영도보다 낮은 온도: -999.0,dlt.original.topic:device-ev
 | `ReliableProcessorTest` | 없음 (`MockProducer`) | 중복 · 깨진 JSON · 이상값 · 재시도 성공/초과 |
 | `KafkaRoundTripIT` | Testcontainers 로 진짜 Kafka | 같은 키는 한 파티션에, 보낸 순서대로 |
 
+`KafkaRoundTripIT` 를 돌리려면 Docker 가 켜져 있어야 한다 (`apache/kafka:4.4.0` 컨테이너를 띄운다).
+
+### 실행 결과
+
+2026-11-25 에 macOS · Java 21 · Docker Engine 27.4.0 환경에서 `./gradlew clean test` 를 돌린 결과:
+
+```
+KafkaRoundTripIT > 같은_키는_같은_파티션에_보낸_순서대로_쌓인다() PASSED
+
+ReliableProcessorTest > 깨진_JSON_은_재시도_없이_DLT_로_간다() PASSED
+ReliableProcessorTest > 정상_메시지는_처리된다() PASSED
+ReliableProcessorTest > 재시도_횟수를_넘기면_DLT_로_간다() PASSED
+ReliableProcessorTest > 같은_eventId_가_다시_오면_건너뛴다() PASSED
+ReliableProcessorTest > 말이_안_되는_값은_DLT_로_간다() PASSED
+ReliableProcessorTest > 일시적_실패는_재시도해서_성공한다() PASSED
+
+BUILD SUCCESSFUL in 32s
+```
+
+7개 모두 통과했다.
+
 ## 구조
 
 ```
