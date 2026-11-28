@@ -29,6 +29,20 @@ import java.util.Properties;
  *
  * <pre>./gradlew consume                  # 그룹 step03
  * ./gradlew consume -Pargs="other"     # 다른 그룹 → 처음부터</pre>
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *   device-events ──poll──▶ ★SimpleConsumer (그룹 step03, 혼자서 파티션 0·1·2 전부)
+ *                 ◀─commit── (__consumer_offsets 에 "여기까지 읽었다" 저장)
+ * </pre>
+ * <ul>
+ *   <li><b>역할</b>: 가장 단순한 처리 서비스. 받은 것을 출력만 한다</li>
+ *   <li><b>입력 / 출력</b>: {@code device-events} / 콘솔 출력 + 커밋 위치</li>
+ *   <li><b>쓰는 것</b>: {@code KafkaSettings}</li>
+ *   <li><b>가져다 쓰는 곳</b>: {@link #consumerProps(String)} 와 {@link #installShutdownHook} 을 step04 · step05 가 재사용
+ *       → 이 파일을 이해하면 뒤 단계는 <b>달라진 부분만</b> 보면 된다</li>
+ *   <li><b>다음 단계</b>: step04 GroupConsumer — 같은 일을 여러 명이 나눠서</li>
+ * </ul>
  */
 public final class SimpleConsumer {
 

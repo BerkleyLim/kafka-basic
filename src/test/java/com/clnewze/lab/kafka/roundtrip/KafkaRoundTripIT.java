@@ -30,6 +30,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * 진짜 Kafka(Docker)로 "같은 키는 같은 파티션, 파티션 안에서는 순서 유지" 를 확인한다.
  * Docker 가 켜져 있어야 한다.
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *   Testcontainers ──띄움──▶ 임시 Kafka 컨테이너 (실습용 docker-compose 와 별개, 테스트 끝나면 사라짐)
+ *   이 테스트: Producer ──send──▶ 토픽 roundtrip(파티션 3) ──poll──▶ Consumer ── 키별 순서 비교
+ * </pre>
+ * <ul>
+ *   <li><b>확인하는 것</b>: step02 에서 눈으로 본 "키 = 파티션 고정, 파티션 안 순서 유지" 를 자동으로</li>
+ *   <li><b>실습 브로커와의 관계</b>: 손대지 않는다. docker-compose 로 띄운 Kafka 가 꺼져 있어도 돌아간다 (Docker 자체만 필요)</li>
+ * </ul>
  */
 class KafkaRoundTripIT {
 

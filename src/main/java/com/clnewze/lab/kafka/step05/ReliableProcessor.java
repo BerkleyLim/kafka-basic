@@ -31,6 +31,22 @@ import java.util.concurrent.ExecutionException;
  * </ol>
  *
  * <p>이 클래스는 Kafka 소비 루프와 분리해 두어 {@code MockProducer} 로 단위 테스트할 수 있다.
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *   ReliableConsumer ──record──▶ ★handle()
+ *                                  ① JSON 읽기 ── 실패 ──────────────────────▶ DLT
+ *                                  ② 중복 검사 ── 이미 처리 ─▶ DUPLICATE_SKIPPED
+ *                                  ③ 처리 ─┬ 성공 ─────────▶ PROCESSED
+ *                                          ├ 영구 실패 ────────────────────────▶ DLT
+ *                                          └ 일시 실패 ─ 재시도 ─ 초과 ────────▶ DLT
+ * </pre>
+ * <ul>
+ *   <li><b>역할</b>: 업무 규칙. Kafka 소비 루프를 모른다 — record 하나 받고 결과 하나 돌려줄 뿐</li>
+ *   <li><b>입력 / 출력</b>: {@code ConsumerRecord} 한 건 / {@link Outcome}, 실패 시 {@code device-events.DLT} 에 원본 + 이유 헤더</li>
+ *   <li><b>쓰는 것</b>: {@code Json}, {@code DeviceEvent}, {@code KafkaSettings}, DLT 용 {@code Producer}(바깥에서 받는다 → 테스트에서 MockProducer 로 바꿔 끼운다)</li>
+ *   <li><b>쓰는 곳</b>: ReliableConsumer, ReliableProcessorTest</li>
+ * </ul>
  */
 public final class ReliableProcessor {
 

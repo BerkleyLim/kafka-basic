@@ -9,6 +9,17 @@ package com.clnewze.lab.kafka.common;
  *   <li>{@code KAFKA_PORT} 가 있으면 {@code localhost:<그 값>} — docker-compose 와 같은 변수</li>
  *   <li>둘 다 없으면 {@code localhost:9092}</li>
  * </ol>
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *   [모든 step] ──읽음──▶ KafkaSettings ──주소──▶ Kafka 브로커 (docker-compose 의 kafka)
+ * </pre>
+ * <ul>
+ *   <li><b>역할</b>: 토픽 이름 · 파티션 수 · 브로커 주소를 <b>한 곳</b>에 모은다. 값이 흩어지면 보내는 쪽과 받는 쪽이 다른 토픽을 보는 사고가 난다</li>
+ *   <li><b>쓰는 곳</b>: step01 ~ step05 전부</li>
+ *   <li><b>짝</b>: docker-compose.yml 의 {@code KAFKA_PORT} — 같은 환경 변수를 읽어 포트가 어긋나지 않게 한다</li>
+ * </ul>
+ * 전체 그림: docs/00-아키텍처와-구성.md §4
  */
 public final class KafkaSettings {
 

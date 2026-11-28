@@ -16,7 +16,19 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 브로커 없이 처리 규칙만 확인한다. MockProducer 는 kafka-clients 에 들어 있다 */
+/**
+ * 브로커 없이 처리 규칙만 확인한다. MockProducer 는 kafka-clients 에 들어 있다.
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *   이 테스트 ──가짜 record──▶ ReliableProcessor ──DLT 전송──▶ MockProducer (메모리. 보낸 내용을 꺼내 검사)
+ * </pre>
+ * <ul>
+ *   <li><b>확인하는 것</b>: 정상 · 중복 · 깨진 JSON · 이상값 · 일시 실패 후 성공 · 재시도 초과 — step05 의 갈림길 전부</li>
+ *   <li><b>왜 브로커 없이 되나</b>: ReliableProcessor 가 Kafka 소비 루프와 분리돼 있고, DLT 용 Producer 를 바깥에서 받기 때문</li>
+ *   <li><b>backoff 0</b>: 재시도 대기를 0 으로 주어 테스트가 기다리지 않게 한다</li>
+ * </ul>
+ */
 class ReliableProcessorTest {
 
     private MockProducer<String, String> dlt;

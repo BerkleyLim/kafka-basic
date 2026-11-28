@@ -29,6 +29,19 @@ import java.util.concurrent.ExecutionException;
  * </ul>
  *
  * <pre>./gradlew topic</pre>
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *   ★TopicSetup (Admin) ──createTopics──▶ Kafka
+ *                                          ├ device-events      (파티션 3) ← step02~05 가 쓴다
+ *                                          └ device-events.DLT  (파티션 1) ← step05 가 실패분을 넣는다
+ * </pre>
+ * <ul>
+ *   <li><b>역할</b>: 나머지 모든 단계가 쓸 토픽을 미리 준비한다. 브로커가 토픽 자동 생성을 꺼 두었기 때문에(docker-compose) <b>가장 먼저</b> 실행해야 한다</li>
+ *   <li><b>입력 / 출력</b>: 없음 / 토픽 2개</li>
+ *   <li><b>쓰는 것</b>: {@code KafkaSettings}</li>
+ *   <li><b>다음 단계</b>: step02 SimpleProducer 가 이 토픽에 보낸다</li>
+ * </ul>
  */
 public final class TopicSetup {
 
@@ -66,8 +79,10 @@ public final class TopicSetup {
      *
      * <p>"있는지 먼저 확인하고 만들기" 대신 "일단 만들고 이미 있다는 에러를 무시" 하는 방식이다.
      * 확인과 생성 사이에 다른 누가 만들 수도 있으니, 이쪽이 더 안전하다.
+     *
+     * <p>simulation.FactorySimulation 도 이 메서드로 토픽을 준비한다 → public
      */
-    static void createIfAbsent(Admin admin, String name, int partitions) throws InterruptedException {
+    public static void createIfAbsent(Admin admin, String name, int partitions) throws InterruptedException {
         // NewTopic(이름, 파티션 수, 복제 수). 복제 수는 브로커 수보다 클 수 없다 (실습은 브로커 1대 → 1)
         NewTopic topic = new NewTopic(name, partitions, KafkaSettings.REPLICATION_FACTOR);
         try {

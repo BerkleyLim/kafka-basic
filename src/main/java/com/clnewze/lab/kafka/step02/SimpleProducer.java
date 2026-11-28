@@ -37,6 +37,18 @@ import java.util.concurrent.ThreadLocalRandom;
  * </pre>
  *
  * <pre>./gradlew produce -Pargs="12"</pre>
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *   ★SimpleProducer ──send(key=deviceId)──▶ device-events ──▶ step03 · 04 · 05 소비자
+ * </pre>
+ * <ul>
+ *   <li><b>역할</b>: 공장 설비(device-A/B/C) 흉내. 정상 이벤트만 보낸다</li>
+ *   <li><b>입력 / 출력</b>: 보낼 건수(-Pargs) / {@code device-events} 토픽</li>
+ *   <li><b>쓰는 것</b>: {@code KafkaSettings}, {@code DeviceEvent}, {@code Json}</li>
+ *   <li><b>가져다 쓰는 곳</b>: {@link #producerProps()} 를 step05 MixedEventProducer 와 ReliableConsumer(DLT 전송용)가 재사용</li>
+ *   <li><b>다음 단계</b>: step03 SimpleConsumer 로 받아 본다</li>
+ * </ul>
  */
 public final class SimpleProducer {
 

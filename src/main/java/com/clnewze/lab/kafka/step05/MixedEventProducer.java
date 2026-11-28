@@ -15,6 +15,17 @@ import java.util.UUID;
  * Step 05 용 — 일부러 문제가 섞인 메시지를 보낸다.
  *
  * <pre>./gradlew produceBad</pre>
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *   ★MixedEventProducer ──5건──▶ device-events ──▶ step05 ReliableConsumer
+ *     ① 정상  ② 중복(①과 같은 eventId)  ③ 깨진 JSON  ④ 말이 안 되는 값  ⑤ 일시 실패(FLAKY)
+ * </pre>
+ * <ul>
+ *   <li><b>역할</b>: 현실에서 "언젠가 반드시" 오는 나쁜 메시지를 일부러 만든다. ReliableConsumer 의 시험 데이터</li>
+ *   <li><b>입력 / 출력</b>: 없음 / {@code device-events} 토픽에 5건</li>
+ *   <li><b>쓰는 것</b>: step02 의 {@code producerProps}, {@code DeviceEvent}, {@code Json}</li>
+ * </ul>
  */
 public final class MixedEventProducer {
 

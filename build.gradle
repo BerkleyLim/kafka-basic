@@ -1,3 +1,11 @@
+// ─────────────────────────────────────────────
+// kafka-basic 빌드 파일
+//
+// 아키텍처에서의 위치 (docs/00-아키텍처와-구성.md §2, §5)
+//   - Kafka 서버는 docker-compose.yml 이 띄운다. 이 파일은 "클라이언트 쪽(Java 실습 코드)" 만 책임진다
+//   - 맨 아래 steps 표가 ./gradlew <이름> → 실행할 클래스 연결이다. 단계를 추가하면 여기에 한 줄 넣는다
+//   - 테스트 두 종류: ReliableProcessorTest(브로커 없음), KafkaRoundTripIT(Testcontainers 가 임시 Kafka 를 띄움)
+// ─────────────────────────────────────────────
 plugins {
     id 'java'
 }
@@ -48,6 +56,14 @@ test {
 // ─────────────────────────────────────────────
 // 실습 실행 태스크: ./gradlew <이름> [-Pargs="..."]
 // ─────────────────────────────────────────────
+// 이름          단계      역할
+//   topic       step01    토픽 준비 (가장 먼저)
+//   produce     step02    정상 이벤트 보내기
+//   consume     step03    혼자 받기 (그룹 step03)
+//   group       step04    여럿이 나눠 받기 (그룹 step04, 터미널 여러 개)
+//   produceBad  step05    문제 섞인 이벤트 보내기
+//   reliable    step05    중복 · 재시도 · DLT 처리하며 받기 (그룹 step05)
+//   simulate    전체      Step 01~05 를 main 하나로 한 번에 (스레드로 소비자 5개, 결과 요약)
 def steps = [
         topic      : 'com.clnewze.lab.kafka.step01.TopicSetup',
         produce    : 'com.clnewze.lab.kafka.step02.SimpleProducer',
@@ -55,6 +71,7 @@ def steps = [
         group      : 'com.clnewze.lab.kafka.step04.GroupConsumer',
         produceBad : 'com.clnewze.lab.kafka.step05.MixedEventProducer',
         reliable   : 'com.clnewze.lab.kafka.step05.ReliableConsumer',
+        simulate   : 'com.clnewze.lab.kafka.simulation.FactorySimulation',
 ]
 
 steps.each { taskName, mainClassName ->

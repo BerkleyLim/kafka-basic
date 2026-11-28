@@ -1,1 +1,2 @@
+// 단일 모듈 프로젝트. 모든 실습 코드는 src/ 하나에 있다 (구성: docs/00-아키텍처와-구성.md §5)
 rootProject.name = 'kafka-basic'

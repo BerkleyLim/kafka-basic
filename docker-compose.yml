@@ -1,5 +1,15 @@
 # 단일 노드 Kafka (KRaft 모드 — ZooKeeper 없음)
 #
+# 아키텍처에서의 위치 (docs/00-아키텍처와-구성.md §2)
+#
+#   내 PC ─ ./gradlew topic|produce|consume|group|reliable ──localhost:9092──┐
+#                                                                             ▼
+#   Docker ─ [kafka-basic]  브로커 + 컨트롤러 1대, 토픽 device-events / device-events.DLT
+#                ▲ kafka:19092
+#            [kafka-basic-ui] (선택, --profile ui) ◀── 브라우저 localhost:8989
+#
+#   이 파일은 "Kafka 서버만" 띄운다. 실습 코드(Java)는 컨테이너가 아니라 내 PC 에서 Gradle 로 돈다.
+#
 #   docker compose up -d                  # Kafka 만
 #   docker compose --profile ui up -d     # Kafka + 웹 UI (http://localhost:8989)
 #

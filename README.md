@@ -37,6 +37,7 @@ docker compose up -d
 ./gradlew group -Pargs="worker-1"  # Step 04 소비자 그룹   (터미널 여러 개)
 ./gradlew produceBad               # Step 05 문제 섞인 메시지 보내기
 ./gradlew reliable                 # Step 05 중복 · 재시도 · DLT 처리
+./gradlew simulate                 # 전부 한 번에 (main 하나, 20초)
 
 # 3. 정리
 docker compose down
@@ -51,6 +52,8 @@ docker compose down
 
 ## 단계별 따라 하기
 
+> 전체 그림(무엇이 어디서 돌고, 파일마다 무슨 역할인지)은 [00-아키텍처와-구성](docs/00-아키텍처와-구성.md) 에 있다.
+>
 > 처음이라면 [01-개념](docs/01-개념.md) 의 **용어 표**만 먼저 훑고 오면 아래가 훨씬 쉽다.
 > 토픽 · 파티션 · offset · 소비자 그룹, 이 네 단어만 알면 된다.
 
@@ -411,10 +414,62 @@ dlt.reason:절대영도보다 낮은 온도: -999.0,dlt.original.topic:device-ev
 
 ---
 
+### 시뮬레이션 — 전부 한 번에 (`main` 하나)
+
+단계별로 터미널을 여러 개 띄우기 번거로우면, Step 01~05 를 한 프로세스에서 스레드로 돌려 볼 수 있다.
+
+```bash
+./gradlew simulate                 # 20초 (KAFKA_PORT 를 바꿨다면 같은 셸에서)
+./gradlew simulate -Pargs="40"     # 40초
+```
+
+```
+                                ┌─▶ worker-1 ─┐
+ 설비 5대 ─▶ device-events ─────┼─▶ worker-2 ─┼─ 실패분 ─▶ device-events.DLT ─▶ dlt-watcher
+  (나쁜 메시지 20% 섞음)         │  └▶ worker-3 ─┘  ← 절반쯤에서 멈춤 → 리밸런스
+                                └─▶ monitor   (다른 그룹 → 전부 받음)
+```
+
+**실제 출력 (끝부분)**
+
+```
+▼▼ worker-3 를 멈춘다 (partition [2] 담당) → 남은 worker 가 넘겨받는지 보자 ▼▼
+[worker-1] 배정 [0, 1] (지금 담당 [0, 1])
+[worker-2] 배정 [2] (지금 담당 [2])
+…
+보냄   총 115  (정상 90 · 중복 9 · 깨진 JSON 3 · 이상값 4 · 일시 실패 9)
+
+[처리 서비스] 같은 그룹 3명이 파티션을 나눠 받음
+  worker-1  맡았던 partition [0, 1]     처리  48 · 중복 건너뜀  4 · DLT  5
+  worker-2  맡았던 partition [1, 2]     처리  33 · 중복 건너뜀  3 · DLT  2
+  worker-3  맡았던 partition [2]        처리  18 · 중복 건너뜀  2 · DLT  0   ← 중간에 멈춤
+  합계      받음 115 (처리 99 · 중복 9 · DLT 7)
+
+[모니터] 다른 그룹이라 처리 서비스와 상관없이 전부 받음: 115
+[DLT 감시] device-events.DLT 에 쌓인 것: 7  (절대영도보다 낮은 온도 4 · JSON 아님 3)
+
+[검증]
+  ✔ 모니터가 받은 수 = 보낸 수
+  ✔ 처리 서비스가 받은 수 ≥ 보낸 수 (115 ≥ 115)
+  ✔ DLT 감시가 본 수 = 처리 서비스가 DLT 로 보낸 수
+  ✔ DLT ≥ 깨진 JSON + 이상값 (7 ≥ 7)
+```
+
+**읽는 법**
+- worker 셋이 파티션을 하나씩 → worker-3 이 멈추자 남은 둘이 0·1 / 2 로 다시 나눴다 (Step 04).
+- 모니터는 **다른 그룹**이라 처리 서비스와 상관없이 115건을 다 받았다.
+- 깨진 JSON · 이상값은 DLT 로, 일시 실패는 재시도로 살아났다 (Step 05).
+- 메시지는 무작위라 숫자는 매번 다르다. 처리 서비스가 받은 수가 보낸 수보다 **많게** 나오는 판도 있다 — 멈춘 worker 가 커밋하기 전 묶음이 다른 worker 에게 다시 간 것(at-least-once).
+
+코드: [FactorySimulation.java](src/main/java/com/clnewze/lab/kafka/simulation/FactorySimulation.java)
+
+---
+
 ### 다음으로
 
 | 문서 | 내용 |
 |---|---|
+| [00-아키텍처와-구성](docs/00-아키텍처와-구성.md) | 전체 구성도, 메시지 한 건의 흐름, 클래스 의존 관계, 파일별 역할, 난이도 지도 |
 | [01-개념](docs/01-개념.md) | 용어, 파티션과 순서, 커밋, 접속 주소(advertised.listeners) 문제 |
 | [02-CLI-실습](docs/02-CLI-실습.md) | 코드 없이 콘솔 도구로 똑같이 해 보기, 그룹 LAG 보기 |
 | [03-프로듀서-컨슈머](docs/03-프로듀서-컨슈머.md) | Step 01 ~ 04 깊게, 리밸런스 방식 비교 |
@@ -456,6 +511,8 @@ BUILD SUCCESSFUL in 32s
 7개 모두 통과했다.
 
 ## 구조
+
+> 파일별 역할 · 클래스 관계 · 구성도는 [00-아키텍처와-구성](docs/00-아키텍처와-구성.md) 참고.
 
 ```
 kafka-basic/

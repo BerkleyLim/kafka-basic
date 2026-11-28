@@ -39,6 +39,19 @@ import java.util.Map;
  * <pre>./gradlew group -Pargs="worker-1"
  * ./gradlew group -Pargs="worker-2"     # 다른 터미널
  * ./gradlew produce -Pargs="30"         # 또 다른 터미널</pre>
+ *
+ * <h2>아키텍처에서의 위치</h2>
+ * <pre>
+ *                     ┌──▶ ★worker-1 (partition 0, 1)
+ *   device-events ────┤                                   그룹 step04
+ *                     └──▶ ★worker-2 (partition 2)        (하나가 빠지면 남은 쪽이 넘겨받는다)
+ * </pre>
+ * <ul>
+ *   <li><b>역할</b>: 처리 서비스를 <b>여러 대로 늘린(scale-out)</b> 모습. 실무에서 같은 서비스의 Pod 여러 개가 같은 그룹으로 붙는 것과 같다</li>
+ *   <li><b>입력 / 출력</b>: {@code device-events} / 콘솔 출력 + 파티션별 커밋 위치</li>
+ *   <li><b>쓰는 것</b>: {@code KafkaSettings}, step03 의 {@code consumerProps} · {@code installShutdownHook}</li>
+ *   <li><b>다음 단계</b>: step05 — 처리하다 실패하면 어떻게 하나</li>
+ * </ul>
  */
 public final class GroupConsumer {
 
